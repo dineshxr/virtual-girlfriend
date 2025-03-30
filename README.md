@@ -46,7 +46,7 @@ We appreciate all contributions! If you contribute, feel free to add your name b
 
 1. [**Satyam Kumar**](https://github.com/satyamshorrf)
 2. [**Rajesh Kumar**](https://github.com/sigmarajesh)
-3. [**Pratik Kumar**](https://github.com/Vicy7463)
+3. [**Pratik Kumar**](https://github.com/Vicky7463)
 4. [**Sandeep Kumar**](https://github.com/sandeepkrpoddar)
 5. [**Kajal Kumari**](https://github.com/Kajall001)
 6. [**Kajal Kumari**](https://github.com/kajuarya)
