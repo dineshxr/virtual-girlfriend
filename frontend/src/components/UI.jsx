@@ -1,9 +1,28 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useChat } from "../hooks/useChat";
 
 export const UI = ({ hidden, ...props }) => {
   const input = useRef();
   const { chat, loading, cameraZoomed, setCameraZoomed, message } = useChat();
+  const [audioEnabled, setAudioEnabled] = useState(false);
+
+  const enableAudio = async () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioContext();
+      if (ctx.state === "suspended") await ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001; // inaudible
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.01);
+      setAudioEnabled(true);
+      window.__audioEnabled = true;
+    } catch (e) {
+      console.warn("Failed to enable audio:", e);
+    }
+  };
 
   const sendMessage = () => {
     const text = input.current.value;
@@ -19,10 +38,35 @@ export const UI = ({ hidden, ...props }) => {
   return (
     <>
       <div className="fixed top-0 left-0 right-0 bottom-0 z-10 flex justify-between p-4 flex-col pointer-events-none">
-        <div className="self-start backdrop-blur-md bg-white bg-opacity-50 p-4 rounded-lg">
+        <div className="self-start backdrop-blur-md bg-white bg-opacity-50 p-4 rounded-lg flex items-center gap-3">
           <h1 className="font-black text-xl">My Virtual GF</h1>
           <p>I will always love you ❤️</p>
+          {!audioEnabled && (
+            <button
+              onClick={enableAudio}
+              className="pointer-events-auto ml-2 bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-md text-sm"
+            >
+              Enable Audio
+            </button>
+          )}
         </div>
+        {message && (
+          <div className="self-start backdrop-blur-md bg-pink-100 bg-opacity-90 p-4 rounded-lg max-w-lg mx-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 bg-pink-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                💕
+              </div>
+              <div className="flex-1">
+                <p className="text-gray-800 leading-relaxed">{message.text}</p>
+                <div className="flex items-center gap-2 mt-2 text-xs text-gray-600">
+                  <span className="capitalize">{message.facialExpression}</span>
+                  <span>•</span>
+                  <span>{message.animation}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="w-full flex flex-col items-end justify-center gap-4">
           <button
             onClick={() => setCameraZoomed(!cameraZoomed)}

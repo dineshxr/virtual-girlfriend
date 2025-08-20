@@ -114,6 +114,32 @@ export function Avatar(props) {
   const { message, onMessagePlayed, chat } = useChat();
 
   const [lipsync, setLipsync] = useState();
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const sourceRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const mouthTargetRef = useRef("viseme_AA");
+
+  // Detect an available mouth-open morph target once the scene loads
+  useEffect(() => {
+    if (!scene) return;
+    const candidates = ["viseme_AA", "jawOpen", "mouthFunnel"];
+    const hasTarget = (name) => {
+      let found = false;
+      scene.traverse((child) => {
+        if (child.isSkinnedMesh && child.morphTargetDictionary && child.morphTargetDictionary[name] !== undefined) {
+          found = true;
+        }
+      });
+      return found;
+    };
+    for (const c of candidates) {
+      if (hasTarget(c)) {
+        mouthTargetRef.current = c;
+        break;
+      }
+    }
+  }, [scene]);
 
   useEffect(() => {
     console.log(message);
@@ -124,18 +150,104 @@ export function Avatar(props) {
     setAnimation(message.animation);
     setFacialExpression(message.facialExpression);
     setLipsync(message.lipsync);
-    const audio = new Audio("data:audio/mp3;base64," + message.audio);
-    audio.play();
-    setAudio(audio);
-    audio.onended = onMessagePlayed;
+    
+    // Only try to play audio if it exists and is valid
+    if (message.audio && message.audio.trim() !== "") {
+      try {
+        const mime = message.audioMime || "audio/mpeg"; // default to mp3 if not specified
+        const src = `data:${mime};base64,${message.audio}`;
+        const audio = new Audio(src);
+        // Setup fallback lipsync if needed
+        audio.onplay = async () => {
+          try {
+            if (!lipsync || !Array.isArray(lipsync?.mouthCues) || lipsync.mouthCues.length === 0) {
+              // Create audio context on user-gesture unlocked environment
+              const AudioCtx = window.AudioContext || window.webkitAudioContext;
+              if (!audioContextRef.current) {
+                audioContextRef.current = new AudioCtx();
+                if (audioContextRef.current.state === "suspended") {
+                  await audioContextRef.current.resume().catch(() => {});
+                }
+              }
+              const ctx = audioContextRef.current;
+              // Connect media element to analyser
+              analyserRef.current = ctx.createAnalyser();
+              analyserRef.current.fftSize = 1024;
+              dataArrayRef.current = new Uint8Array(analyserRef.current.fftSize);
+              sourceRef.current = ctx.createMediaElementSource(audio);
+              sourceRef.current.connect(analyserRef.current);
+              analyserRef.current.connect(ctx.destination);
+            }
+          } catch (e) {
+            // ignore analyser setup errors
+          }
+        };
+        audio.onerror = (e) => {
+          console.warn("Audio failed to load:", e);
+          // Still call onMessagePlayed to continue the conversation
+          onMessagePlayed();
+        };
+        audio.onended = onMessagePlayed;
+        audio.play().catch(e => {
+          console.warn("Audio failed to play:", e);
+          // Still call onMessagePlayed to continue the conversation
+          onMessagePlayed();
+        });
+        setAudio(audio);
+      } catch (error) {
+        console.warn("Audio creation failed:", error);
+        // Still call onMessagePlayed to continue the conversation
+        onMessagePlayed();
+      }
+    } else {
+      // No audio available, simulate audio end after text display time
+      const textDisplayTime = Math.max(2000, message.text.length * 50); // 50ms per character, minimum 2 seconds
+      setTimeout(onMessagePlayed, textDisplayTime);
+    }
   }, [message]);
+
+  // Cleanup audio graph on unmount or when message changes
+  useEffect(() => {
+    return () => {
+      try {
+        if (sourceRef.current) {
+          sourceRef.current.disconnect();
+        }
+        if (analyserRef.current) {
+          analyserRef.current.disconnect();
+        }
+      } catch {}
+    };
+  }, []);
 
   const { animations } = useGLTF("/models/animations.glb");
 
+  // Filter animations to only include tracks for existing bones
+  const filteredAnimations = React.useMemo(() => {
+    if (!animations || !scene) return [];
+    
+    return animations.map(animation => {
+      const validTracks = animation.tracks.filter(track => {
+        const nodeName = track.name.split('.')[0];
+        let nodeExists = false;
+        
+        scene.traverse((child) => {
+          if (child.name === nodeName) {
+            nodeExists = true;
+          }
+        });
+        
+        return nodeExists;
+      });
+      
+      return new THREE.AnimationClip(animation.name, animation.duration, validTracks);
+    });
+  }, [animations, scene]);
+
   const group = useRef();
-  const { actions, mixer } = useAnimations(animations, group);
+  const { actions, mixer } = useAnimations(filteredAnimations, group);
   const [animation, setAnimation] = useState(
-    animations.find((a) => a.name === "Idle") ? "Idle" : animations[0].name // Check if Idle animation exists otherwise use first animation
+    filteredAnimations.find((a) => a.name === "Idle") ? "Idle" : filteredAnimations[0]?.name || "Idle" // Check if Idle animation exists otherwise use first animation
   );
   useEffect(() => {
     actions[animation]
@@ -201,17 +313,38 @@ export function Avatar(props) {
     }
 
     const appliedMorphTargets = [];
-    if (message && lipsync) {
+    if (message && lipsync && audio && !audio.paused) {
       const currentAudioTime = audio.currentTime;
-      for (let i = 0; i < lipsync.mouthCues.length; i++) {
-        const mouthCue = lipsync.mouthCues[i];
-        if (
-          currentAudioTime >= mouthCue.start &&
-          currentAudioTime <= mouthCue.end
-        ) {
-          appliedMorphTargets.push(corresponding[mouthCue.value]);
-          lerpMorphTarget(corresponding[mouthCue.value], 1, 0.2);
-          break;
+      if (lipsync.mouthCues && Array.isArray(lipsync.mouthCues) && lipsync.mouthCues.length > 0) {
+        for (let i = 0; i < lipsync.mouthCues.length; i++) {
+          const mouthCue = lipsync.mouthCues[i];
+          if (
+            currentAudioTime >= mouthCue.start &&
+            currentAudioTime <= mouthCue.end
+          ) {
+            appliedMorphTargets.push(corresponding[mouthCue.value]);
+            lerpMorphTarget(corresponding[mouthCue.value], 1, 0.2);
+            break;
+          }
+        }
+      } else if (analyserRef.current) {
+        // Fallback lipsync: drive mouth openness by audio amplitude
+        const analyser = analyserRef.current;
+        const dataArray = dataArrayRef.current;
+        analyser.getByteTimeDomainData(dataArray);
+        // Compute RMS amplitude (0..1)
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const v = (dataArray[i] - 128) / 128; // center to -1..1
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        // Simple smoothing and thresholding
+        const intensity = Math.min(1, Math.max(0, (rms - 0.015) * 8));
+        const target = mouthTargetRef.current;
+        if (intensity > 0.005 && target) {
+          appliedMorphTargets.push(target);
+          lerpMorphTarget(target, intensity, 0.25);
         }
       }
     }
@@ -236,7 +369,7 @@ export function Avatar(props) {
     }),
     animation: {
       value: animation,
-      options: animations.map((a) => a.name),
+      options: filteredAnimations.map((a) => a.name),
       onChange: (value) => setAnimation(value),
     },
     facialExpression: {
