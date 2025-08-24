@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+const backendUrl = import.meta.env.VITE_BACKEND_URL || ""; // empty => same-origin Vercel functions
 
 const ChatContext = createContext();
 
 // Health check function to verify backend connectivity
 const checkBackendHealth = async () => {
   try {
-    const response = await fetch(`${backendUrl}/`, {
+    const healthPath = backendUrl ? `${backendUrl}/` : `/api/health`;
+    const response = await fetch(healthPath, {
       method: "GET",
       timeout: 5000,
     });
@@ -41,7 +42,8 @@ export const ChatProvider = ({ children }) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
       
-      const response = await fetch(`${backendUrl}/chat`, {
+      const chatPath = backendUrl ? `${backendUrl}/chat` : `/api/chat`;
+      const response = await fetch(chatPath, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

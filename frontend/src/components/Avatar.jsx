@@ -120,6 +120,19 @@ export function Avatar(props) {
   const dataArrayRef = useRef(null);
   const mouthTargetRef = useRef("viseme_AA");
 
+  // Bone refs for subtle procedural motion
+  const leftArmRef = useRef(null);
+  const rightArmRef = useRef(null);
+  const leftForeArmRef = useRef(null);
+  const rightForeArmRef = useRef(null);
+  const leftUpLegRef = useRef(null);
+  const rightUpLegRef = useRef(null);
+  const leftLegRef = useRef(null);
+  const rightLegRef = useRef(null);
+
+  // Store base quaternions so we can apply additive rotations each frame
+  const baseQuatsRef = useRef({});
+
   // Detect an available mouth-open morph target once the scene loads
   useEffect(() => {
     if (!scene) return;
@@ -139,6 +152,43 @@ export function Avatar(props) {
         break;
       }
     }
+
+    // Locate common humanoid bones by name (RPM/GLTF typical names)
+    const byName = (n) => scene.getObjectByName(n);
+
+    // One-time debug: list all bone names to help mapping
+    try {
+      const boneNames = [];
+      scene.traverse((child) => {
+        if (child.isBone) boneNames.push(child.name);
+      });
+      if (boneNames.length) console.log("[Avatar] Bones:", boneNames.sort());
+    } catch {}
+
+    // Try several common naming schemes
+    const pick = (...names) => names.map(byName).find(Boolean) || null;
+    leftArmRef.current = pick("LeftArm", "LeftUpperArm", "UpperArm_L", "mixamorigLeftArm");
+    rightArmRef.current = pick("RightArm", "RightUpperArm", "UpperArm_R", "mixamorigRightArm");
+    leftForeArmRef.current = pick("LeftForeArm", "LeftLowerArm", "LowerArm_L", "mixamorigLeftForeArm");
+    rightForeArmRef.current = pick("RightForeArm", "RightLowerArm", "LowerArm_R", "mixamorigRightForeArm");
+    leftUpLegRef.current = pick("LeftUpLeg", "LeftUpperLeg", "UpperLeg_L", "mixamorigLeftUpLeg");
+    rightUpLegRef.current = pick("RightUpLeg", "RightUpperLeg", "UpperLeg_R", "mixamorigRightUpLeg");
+    leftLegRef.current = pick("LeftLeg", "LeftLowerLeg", "LowerLeg_L", "mixamorigLeftLeg");
+    rightLegRef.current = pick("RightLeg", "RightLowerLeg", "LowerLeg_R", "mixamorigRightLeg");
+
+    // Cache base quaternions
+    const setBase = (key, bone) => {
+      if (!bone) return;
+      baseQuatsRef.current[key] = bone.quaternion.clone();
+    };
+    setBase("lArm", leftArmRef.current);
+    setBase("rArm", rightArmRef.current);
+    setBase("lFore", leftForeArmRef.current);
+    setBase("rFore", rightForeArmRef.current);
+    setBase("lUpLeg", leftUpLegRef.current);
+    setBase("rUpLeg", rightUpLegRef.current);
+    setBase("lLeg", leftLegRef.current);
+    setBase("rLeg", rightLegRef.current);
   }, [scene]);
 
   useEffect(() => {
@@ -225,23 +275,25 @@ export function Avatar(props) {
   // Filter animations to only include tracks for existing bones
   const filteredAnimations = React.useMemo(() => {
     if (!animations || !scene) return [];
-    
-    return animations.map(animation => {
-      const validTracks = animation.tracks.filter(track => {
+
+    const clips = [];
+    for (const animation of animations) {
+      const validTracks = animation.tracks.filter((track) => {
         const nodeName = track.name.split('.')[0];
-        let nodeExists = false;
-        
-        scene.traverse((child) => {
-          if (child.name === nodeName) {
-            nodeExists = true;
-          }
-        });
-        
-        return nodeExists;
+        // Prefer a direct lookup; fallback to traversal
+        let target = scene.getObjectByName(nodeName);
+        if (!target) {
+          scene.traverse((child) => {
+            if (!target && child.name === nodeName) target = child;
+          });
+        }
+        return !!target;
       });
-      
-      return new THREE.AnimationClip(animation.name, animation.duration, validTracks);
-    });
+      if (validTracks.length > 0) {
+        clips.push(new THREE.AnimationClip(animation.name, animation.duration, validTracks));
+      }
+    }
+    return clips;
   }, [animations, scene]);
 
   const group = useRef();
@@ -290,7 +342,7 @@ export function Avatar(props) {
   const [facialExpression, setFacialExpression] = useState("");
   const [audio, setAudio] = useState();
 
-  useFrame(() => {
+  useFrame((state) => {
     !setupMode &&
       Object.keys(nodes.EyeLeft.morphTargetDictionary).forEach((key) => {
         const mapping = facialExpressions[facialExpression];
@@ -306,6 +358,35 @@ export function Avatar(props) {
 
     lerpMorphTarget("eyeBlinkLeft", blink || winkLeft ? 1 : 0, 0.5);
     lerpMorphTarget("eyeBlinkRight", blink || winkRight ? 1 : 0, 0.5);
+
+    // Subtle procedural arm/leg motion layered over animations
+    // Only when not in setup mode and when bones are available
+    if (!setupMode) {
+      const t = state.clock.getElapsedTime();
+      const small = THREE.MathUtils.degToRad; // helper
+      const applyAdd = (bone, base, dx = 0, dy = 0, dz = 0) => {
+        if (!bone || !base) return;
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(dx, dy, dz));
+        bone.quaternion.copy(base).multiply(q);
+      };
+
+      // Gentle arm swing
+      const armSwing = small(3.5) * Math.sin(t * 1.2);
+      const foreSwing = small(2.0) * Math.sin(t * 1.6 + 0.7);
+      applyAdd(leftArmRef.current, baseQuatsRef.current.lArm, 0, 0, armSwing);
+      applyAdd(rightArmRef.current, baseQuatsRef.current.rArm, 0, 0, -armSwing);
+      applyAdd(leftForeArmRef.current, baseQuatsRef.current.lFore, 0, 0, foreSwing * 0.6);
+      applyAdd(rightForeArmRef.current, baseQuatsRef.current.rFore, 0, 0, -foreSwing * 0.6);
+
+      // Subtle weight shift in legs
+      const legPhase = t * 0.8;
+      const upLegRot = small(2.0) * Math.sin(legPhase);
+      const lowerLegRot = small(1.2) * Math.sin(legPhase + 0.9);
+      applyAdd(leftUpLegRef.current, baseQuatsRef.current.lUpLeg, 0, 0, upLegRot * 0.5);
+      applyAdd(rightUpLegRef.current, baseQuatsRef.current.rUpLeg, 0, 0, -upLegRot * 0.5);
+      applyAdd(leftLegRef.current, baseQuatsRef.current.lLeg, lowerLegRot * 0.3, 0, 0);
+      applyAdd(rightLegRef.current, baseQuatsRef.current.rLeg, -lowerLegRot * 0.3, 0, 0);
+    }
 
     // LIPSYNC
     if (setupMode) {
