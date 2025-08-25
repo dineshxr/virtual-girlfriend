@@ -27,6 +27,7 @@ const Dots = (props) => {
     }
   }, [loading]);
   if (!loading) return null;
+
   return (
     <group {...props}>
       <Text fontSize={0.14} anchorX={"left"} anchorY={"bottom"}>
@@ -37,9 +38,31 @@ const Dots = (props) => {
   );
 };
 
-export const Experience = () => {
+export const Experience = ({ background = "Bar", useCustomHdri = false }) => {
   const cameraControls = useRef();
   const { cameraZoomed } = useChat();
+  // Map our UI labels to drei presets - updated for better avatar matching
+  const envPreset =
+    background === "Park"
+      ? "city"
+      : background === "Beach"
+      ? "dawn"
+      : "night"; // Bar -> night (warmer, more intimate)
+
+  // Optional HDRI files from Poly Haven (1k) - better matched to avatar style
+  const filesUrl = (() => {
+    if (!useCustomHdri) return null;
+    const base = "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k";
+    switch (background) {
+      case "Park":
+        return `${base}/urban_alley_01_1k.hdr`; // Urban setting
+      case "Beach":
+        return `${base}/golden_bay_1k.hdr`; // Warmer beach
+      case "Bar":
+      default:
+        return `${base}/brown_photostudio_02_1k.hdr`; // Warm studio lighting
+    }
+  })();
 
   useEffect(() => {
     cameraControls.current.setLookAt(0, 2, 5, 0, 1.5, 0);
@@ -55,7 +78,11 @@ export const Experience = () => {
   return (
     <>
       <CameraControls ref={cameraControls} />
-      <Environment preset="sunset" />
+      {filesUrl ? (
+        <Environment files={filesUrl} background blur={0.2} />
+      ) : (
+        <Environment preset={envPreset} />
+      )}
       {/* Wrapping Dots into Suspense to prevent Blink when Troika/Font is loaded */}
       <Suspense>
         <Dots position-y={1.75} position-x={-0.02} />

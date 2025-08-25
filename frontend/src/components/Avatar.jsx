@@ -107,11 +107,15 @@ const corresponding = {
 let setupMode = false;
 
 export function Avatar(props) {
-  const { nodes, materials, scene } = useGLTF(
-    "/models/64f1a714fe61576b46f27ca2.glb"
-  );
+  const gltfData = useGLTF("/models/64f1a714fe61576b46f27ca2.glb");
+  const { nodes, materials, scene } = gltfData || {};
 
   const { message, onMessagePlayed, chat } = useChat();
+
+  // Early return if GLTF data is not loaded
+  if (!nodes || !materials || !scene) {
+    return null;
+  }
 
   const [lipsync, setLipsync] = useState();
   const audioContextRef = useRef(null);
@@ -136,59 +140,79 @@ export function Avatar(props) {
   // Detect an available mouth-open morph target once the scene loads
   useEffect(() => {
     if (!scene) return;
-    const candidates = ["viseme_AA", "jawOpen", "mouthFunnel"];
-    const hasTarget = (name) => {
-      let found = false;
-      scene.traverse((child) => {
-        if (child.isSkinnedMesh && child.morphTargetDictionary && child.morphTargetDictionary[name] !== undefined) {
-          found = true;
-        }
-      });
-      return found;
-    };
-    for (const c of candidates) {
-      if (hasTarget(c)) {
-        mouthTargetRef.current = c;
-        break;
-      }
-    }
-
-    // Locate common humanoid bones by name (RPM/GLTF typical names)
-    const byName = (n) => scene.getObjectByName(n);
-
-    // One-time debug: list all bone names to help mapping
+    
     try {
-      const boneNames = [];
-      scene.traverse((child) => {
-        if (child.isBone) boneNames.push(child.name);
-      });
-      if (boneNames.length) console.log("[Avatar] Bones:", boneNames.sort());
-    } catch {}
+      const candidates = ["viseme_AA", "jawOpen", "mouthFunnel"];
+      const hasTarget = (name) => {
+        let found = false;
+        scene.traverse((child) => {
+          if (child.isSkinnedMesh && child.morphTargetDictionary && child.morphTargetDictionary[name] !== undefined) {
+            found = true;
+          }
+        });
+        return found;
+      };
+      for (const c of candidates) {
+        if (hasTarget(c)) {
+          mouthTargetRef.current = c;
+          break;
+        }
+      }
 
-    // Try several common naming schemes
-    const pick = (...names) => names.map(byName).find(Boolean) || null;
-    leftArmRef.current = pick("LeftArm", "LeftUpperArm", "UpperArm_L", "mixamorigLeftArm");
-    rightArmRef.current = pick("RightArm", "RightUpperArm", "UpperArm_R", "mixamorigRightArm");
-    leftForeArmRef.current = pick("LeftForeArm", "LeftLowerArm", "LowerArm_L", "mixamorigLeftForeArm");
-    rightForeArmRef.current = pick("RightForeArm", "RightLowerArm", "LowerArm_R", "mixamorigRightForeArm");
-    leftUpLegRef.current = pick("LeftUpLeg", "LeftUpperLeg", "UpperLeg_L", "mixamorigLeftUpLeg");
-    rightUpLegRef.current = pick("RightUpLeg", "RightUpperLeg", "UpperLeg_R", "mixamorigRightUpLeg");
-    leftLegRef.current = pick("LeftLeg", "LeftLowerLeg", "LowerLeg_L", "mixamorigLeftLeg");
-    rightLegRef.current = pick("RightLeg", "RightLowerLeg", "LowerLeg_R", "mixamorigRightLeg");
+      // Locate common humanoid bones by name (RPM/GLTF typical names)
+      const byName = (n) => {
+        try {
+          return scene.getObjectByName(n);
+        } catch {
+          return null;
+        }
+      };
 
-    // Cache base quaternions
-    const setBase = (key, bone) => {
-      if (!bone) return;
-      baseQuatsRef.current[key] = bone.quaternion.clone();
-    };
-    setBase("lArm", leftArmRef.current);
-    setBase("rArm", rightArmRef.current);
-    setBase("lFore", leftForeArmRef.current);
-    setBase("rFore", rightForeArmRef.current);
-    setBase("lUpLeg", leftUpLegRef.current);
-    setBase("rUpLeg", rightUpLegRef.current);
-    setBase("lLeg", leftLegRef.current);
-    setBase("rLeg", rightLegRef.current);
+      // One-time debug: list all bone names to help mapping
+      try {
+        const boneNames = [];
+        scene.traverse((child) => {
+          if (child.isBone) boneNames.push(child.name);
+        });
+        if (boneNames.length) console.log("[Avatar] Bones:", boneNames.sort());
+      } catch {}
+
+      // Try several common naming schemes with error handling
+      const pick = (...names) => {
+        try {
+          return names.map(byName).find(Boolean) || null;
+        } catch {
+          return null;
+        }
+      };
+      
+      leftArmRef.current = pick("LeftArm", "LeftUpperArm", "UpperArm_L", "mixamorigLeftArm");
+      rightArmRef.current = pick("RightArm", "RightUpperArm", "UpperArm_R", "mixamorigRightArm");
+      leftForeArmRef.current = pick("LeftForeArm", "LeftLowerArm", "LowerArm_L", "mixamorigLeftForeArm");
+      rightForeArmRef.current = pick("RightForeArm", "RightLowerArm", "LowerArm_R", "mixamorigRightForeArm");
+      leftUpLegRef.current = pick("LeftUpLeg", "LeftUpperLeg", "UpperLeg_L", "mixamorigLeftUpLeg");
+      rightUpLegRef.current = pick("RightUpLeg", "RightUpperLeg", "UpperLeg_R", "mixamorigRightUpLeg");
+      leftLegRef.current = pick("LeftLeg", "LeftLowerLeg", "LowerLeg_L", "mixamorigLeftLeg");
+      rightLegRef.current = pick("RightLeg", "RightLowerLeg", "LowerLeg_R", "mixamorigRightLeg");
+
+      // Cache base quaternions with error handling
+      const setBase = (key, bone) => {
+        try {
+          if (!bone || !bone.quaternion) return;
+          baseQuatsRef.current[key] = bone.quaternion.clone();
+        } catch {}
+      };
+      setBase("lArm", leftArmRef.current);
+      setBase("rArm", rightArmRef.current);
+      setBase("lFore", leftForeArmRef.current);
+      setBase("rFore", rightForeArmRef.current);
+      setBase("lUpLeg", leftUpLegRef.current);
+      setBase("rUpLeg", rightUpLegRef.current);
+      setBase("lLeg", leftLegRef.current);
+      setBase("rLeg", rightLegRef.current);
+    } catch (error) {
+      console.warn("[Avatar] Error in scene setup:", error);
+    }
   }, [scene]);
 
   useEffect(() => {
@@ -280,6 +304,12 @@ export function Avatar(props) {
     for (const animation of animations) {
       const validTracks = animation.tracks.filter((track) => {
         const nodeName = track.name.split('.')[0];
+        
+        // Skip Armature tracks as they're often missing in RPM models
+        if (nodeName === 'Armature') {
+          return false;
+        }
+        
         // Prefer a direct lookup; fallback to traversal
         let target = scene.getObjectByName(nodeName);
         if (!target) {
@@ -310,35 +340,42 @@ export function Avatar(props) {
   }, [animation]);
 
   const lerpMorphTarget = (target, value, speed = 0.1) => {
-    scene.traverse((child) => {
-      if (child.isSkinnedMesh && child.morphTargetDictionary) {
-        const index = child.morphTargetDictionary[target];
-        if (
-          index === undefined ||
-          child.morphTargetInfluences[index] === undefined
-        ) {
-          return;
-        }
-        child.morphTargetInfluences[index] = THREE.MathUtils.lerp(
-          child.morphTargetInfluences[index],
-          value,
-          speed
-        );
+    try {
+      if (!scene) return;
+      scene.traverse((child) => {
+        if (child.isSkinnedMesh && child.morphTargetDictionary) {
+          const index = child.morphTargetDictionary[target];
+          if (
+            index === undefined ||
+            child.morphTargetInfluences[index] === undefined
+          ) {
+            return;
+          }
+          child.morphTargetInfluences[index] = THREE.MathUtils.lerp(
+            child.morphTargetInfluences[index],
+            value,
+            speed
+          );
 
-        if (!setupMode) {
-          try {
-            set({
-              [target]: value,
-            });
-          } catch (e) {}
+          if (!setupMode) {
+            try {
+              set({
+                [target]: value,
+              });
+            } catch (e) {}
+          }
         }
-      }
-    });
+      });
+    } catch (error) {
+      // Silently handle morph target errors
+    }
   };
 
   const [blink, setBlink] = useState(false);
   const [winkLeft, setWinkLeft] = useState(false);
   const [winkRight, setWinkRight] = useState(false);
+  const [naturalWink, setNaturalWink] = useState({ left: false, right: false });
+  const [breathingPhase, setBreathingPhase] = useState(0);
   const [facialExpression, setFacialExpression] = useState("");
   const [audio, setAudio] = useState();
 
@@ -356,8 +393,8 @@ export function Avatar(props) {
         }
       });
 
-    lerpMorphTarget("eyeBlinkLeft", blink || winkLeft ? 1 : 0, 0.5);
-    lerpMorphTarget("eyeBlinkRight", blink || winkRight ? 1 : 0, 0.5);
+    lerpMorphTarget("eyeBlinkLeft", blink || winkLeft || naturalWink.left ? 1 : 0, 0.5);
+    lerpMorphTarget("eyeBlinkRight", blink || winkRight || naturalWink.right ? 1 : 0, 0.5);
 
     // Subtle procedural arm/leg motion layered over animations
     // Only when not in setup mode and when bones are available
@@ -370,22 +407,50 @@ export function Avatar(props) {
         bone.quaternion.copy(base).multiply(q);
       };
 
-      // Gentle arm swing
-      const armSwing = small(3.5) * Math.sin(t * 1.2);
-      const foreSwing = small(2.0) * Math.sin(t * 1.6 + 0.7);
-      applyAdd(leftArmRef.current, baseQuatsRef.current.lArm, 0, 0, armSwing);
-      applyAdd(rightArmRef.current, baseQuatsRef.current.rArm, 0, 0, -armSwing);
-      applyAdd(leftForeArmRef.current, baseQuatsRef.current.lFore, 0, 0, foreSwing * 0.6);
-      applyAdd(rightForeArmRef.current, baseQuatsRef.current.rFore, 0, 0, -foreSwing * 0.6);
+      // Enhanced natural movements with more variation and error handling
+      try {
+        const slowWave = t * 0.6;
+        const mediumWave = t * 1.2;
+        const fastWave = t * 2.1;
+        
+        // Breathing motion affects torso and subtle arm movement
+        const breathIntensity = 0.8 + 0.4 * Math.sin(slowWave);
+        setBreathingPhase(breathIntensity);
+        
+        // More natural arm movements with multiple frequencies
+        const armSwingPrimary = small(4.0) * Math.sin(mediumWave);
+        const armSwingSecondary = small(1.5) * Math.sin(fastWave + 0.3);
+        const armSwingCombined = armSwingPrimary + armSwingSecondary;
+        
+        const foreSwingPrimary = small(2.5) * Math.sin(mediumWave * 1.3 + 0.7);
+        const foreSwingSecondary = small(0.8) * Math.sin(fastWave * 0.7 + 1.2);
+        const foreSwingCombined = foreSwingPrimary + foreSwingSecondary;
+        
+        // Apply arm movements with breathing influence
+        applyAdd(leftArmRef.current, baseQuatsRef.current.lArm, 
+          small(0.5) * Math.sin(slowWave), 0, armSwingCombined + small(1.0) * breathIntensity * 0.1);
+        applyAdd(rightArmRef.current, baseQuatsRef.current.rArm, 
+          small(0.5) * Math.sin(slowWave + 0.2), 0, -armSwingCombined - small(1.0) * breathIntensity * 0.1);
+        applyAdd(leftForeArmRef.current, baseQuatsRef.current.lFore, 0, 0, foreSwingCombined * 0.7);
+        applyAdd(rightForeArmRef.current, baseQuatsRef.current.rFore, 0, 0, -foreSwingCombined * 0.7);
 
-      // Subtle weight shift in legs
-      const legPhase = t * 0.8;
-      const upLegRot = small(2.0) * Math.sin(legPhase);
-      const lowerLegRot = small(1.2) * Math.sin(legPhase + 0.9);
-      applyAdd(leftUpLegRef.current, baseQuatsRef.current.lUpLeg, 0, 0, upLegRot * 0.5);
-      applyAdd(rightUpLegRef.current, baseQuatsRef.current.rUpLeg, 0, 0, -upLegRot * 0.5);
-      applyAdd(leftLegRef.current, baseQuatsRef.current.lLeg, lowerLegRot * 0.3, 0, 0);
-      applyAdd(rightLegRef.current, baseQuatsRef.current.rLeg, -lowerLegRot * 0.3, 0, 0);
+        // Enhanced leg movements with weight shifting
+        const legPhase = slowWave * 1.1;
+        const weightShift = small(1.8) * Math.sin(legPhase);
+        const microShift = small(0.6) * Math.sin(fastWave * 0.5);
+        
+        const upLegRot = weightShift + microShift;
+        const lowerLegRot = small(1.5) * Math.sin(legPhase + 0.9) + small(0.4) * Math.sin(fastWave * 0.8 + 1.1);
+        
+        applyAdd(leftUpLegRef.current, baseQuatsRef.current.lUpLeg, 
+          small(0.3) * Math.sin(slowWave + 0.5), 0, upLegRot * 0.6);
+        applyAdd(rightUpLegRef.current, baseQuatsRef.current.rUpLeg, 
+          small(0.3) * Math.sin(slowWave + 0.7), 0, -upLegRot * 0.6);
+        applyAdd(leftLegRef.current, baseQuatsRef.current.lLeg, lowerLegRot * 0.4, 0, 0);
+        applyAdd(rightLegRef.current, baseQuatsRef.current.rLeg, -lowerLegRot * 0.4, 0, 0);
+      } catch (error) {
+        // Silently handle animation errors to prevent crashes
+      }
     }
 
     // LIPSYNC
@@ -504,19 +569,42 @@ export function Avatar(props) {
     )
   );
 
+  // Enhanced natural eye movements and expressions
   useEffect(() => {
     let blinkTimeout;
+    let winkTimeout;
+    
     const nextBlink = () => {
       blinkTimeout = setTimeout(() => {
         setBlink(true);
         setTimeout(() => {
           setBlink(false);
           nextBlink();
-        }, 200);
-      }, THREE.MathUtils.randInt(1000, 5000));
+        }, THREE.MathUtils.randInt(150, 300));
+      }, THREE.MathUtils.randInt(2000, 6000));
     };
+    
+    const randomWink = () => {
+      winkTimeout = setTimeout(() => {
+        const isLeft = Math.random() > 0.5;
+        setNaturalWink(prev => ({ ...prev, [isLeft ? 'left' : 'right']: true }));
+        
+        setTimeout(() => {
+          setNaturalWink(prev => ({ ...prev, [isLeft ? 'left' : 'right']: false }));
+        }, THREE.MathUtils.randInt(200, 400));
+        
+        // Schedule next wink
+        setTimeout(randomWink, THREE.MathUtils.randInt(8000, 20000));
+      }, THREE.MathUtils.randInt(5000, 15000));
+    };
+    
     nextBlink();
-    return () => clearTimeout(blinkTimeout);
+    randomWink();
+    
+    return () => {
+      clearTimeout(blinkTimeout);
+      clearTimeout(winkTimeout);
+    };
   }, []);
 
   return (
